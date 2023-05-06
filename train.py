@@ -8,7 +8,7 @@ from torch import nn, optim
 
 from model import RHPBM
 
-batch = 32
+batch = 64
 epoch = 200
 lr = 1e-4
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

@@ -15,24 +15,27 @@ class EncoderCell(nn.Module):
         self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
         self.se = SE(out_channels)
         
-        self.rconv = None
-
+        self.shortcut = None
         if stride > 1:
-            self.rconv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride)
-            
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride),
+                nn.BatchNorm2d(out_channels)
+            )
 
     def forward(self, x):
         y = self.conv1(self.swish(self.bn1(x)))
         y = self.conv2(self.swish(self.bn2(y)))
         y = self.se(y)
         if self.rconv:
-            x = self.rconv(x)
-        return y+x
+            x = self.shortcut(x)
+        return y+x.mul(0.5)
 
 
 class DecoderCell(nn.Module):
     def __init__(self, in_channels, out_channels, stride, ext, output_padding):
         super(DecoderCell, self).__init__()
+        self.tag = stride > 1
+
         ext_channels = in_channels * ext
         self.swish = Swish()
 
@@ -43,13 +46,16 @@ class DecoderCell(nn.Module):
         self.bn3 = nn.BatchNorm2d(ext_channels)
         self.conv3 = nn.Conv2d(in_channels=ext_channels, out_channels=in_channels, kernel_size=1)
         self.bn4 = nn.BatchNorm2d(in_channels)
-        self.conv4 = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=stride, padding=1, output_padding=output_padding)
-        self.bn5 = nn.BatchNorm2d(out_channels)
+        if self.tag:
+            self.conv4 = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=stride, padding=1, output_padding=output_padding)
+            self.bn5 = nn.BatchNorm2d(out_channels)
         self.se = SE(out_channels)
-
-        self.rconv = None
-        if stride > 1:
-            self.rconv = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride, output_padding=output_padding)
+        if self.tag:
+            self.shortcut = nn.Sequential(
+                nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride,
+                                   output_padding=output_padding),
+                nn.BatchNorm2d(out_channels)
+            )
 
     def forward(self, x):
         # print("--------------------------")
@@ -61,13 +67,14 @@ class DecoderCell(nn.Module):
         # print('dep. sep. conv:', y.shape)
         y = self.swish(self.bn4(self.conv3(y)))
         # print('dconv 1x1:', y.shape)
-        y = self.bn5(self.conv4(y))
+        if self.tag:
+            y = self.bn5(self.conv4(y))
         # print('dconv 3x3:', y.shape)
         y = self.se(y)
-        if self.rconv:
-            x = self.rconv(x)
+        if self.tag:
+            x = self.shortcut(x)
         # print('final x,y:', x.shape, y.shape)
-        return y+x
+        return y+x.mul(0.5)
 
 
 class Block(nn.Module):
@@ -144,7 +151,7 @@ class RHPBM(nn.Module):
         return self.mean_z(z), self.logvar_z(z)
 
     def decode(self, z):
-        # print('-------------dncoder-------------')
+        # print('-------------decoder-------------')
         # print("[Input]: ", z.shape)
         _x = self.relu(self.dfc1(z))
         # print("[FC Layer1]: ", _x.shape)
