@@ -10,16 +10,16 @@ class EncoderCell(nn.Module):
         self.swish = Swish()
 
         self.bn1 = nn.BatchNorm2d(in_channels)
-        self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1, stride=stride)
+        self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1,
+                               stride=stride)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
         self.se = SE(out_channels)
-        
+
         self.rconv = None
 
         if stride > 1:
             self.rconv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride)
-            
 
     def forward(self, x):
         y = self.conv1(self.swish(self.bn1(x)))
@@ -27,7 +27,7 @@ class EncoderCell(nn.Module):
         y = self.se(y)
         if self.rconv:
             x = self.rconv(x)
-        return y+x
+        return y + x
 
 
 class DecoderCell(nn.Module):
@@ -43,31 +43,30 @@ class DecoderCell(nn.Module):
         self.bn3 = nn.BatchNorm2d(ext_channels)
         self.conv3 = nn.Conv2d(in_channels=ext_channels, out_channels=in_channels, kernel_size=1)
         self.bn4 = nn.BatchNorm2d(in_channels)
-        self.conv4 = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=stride, padding=1, output_padding=output_padding)
-        self.bn5 = nn.BatchNorm2d(out_channels)
+        self.conv4 = None
+        self.bn5 = None
+        if stride > 1:
+            self.conv4 = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3,
+                                            stride=stride, padding=1, output_padding=output_padding)
+            self.bn5 = nn.BatchNorm2d(out_channels)
         self.se = SE(out_channels)
 
         self.rconv = None
         if stride > 1:
-            self.rconv = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride, output_padding=output_padding)
+            self.rconv = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1,
+                                            stride=stride, output_padding=output_padding)
 
     def forward(self, x):
-        # print("--------------------------")
-        # print('input:', x.shape)
         y = self.bn1(x)
         y = self.swish(self.bn2(self.conv1(y)))
-        # print('conv 1x1:', y.shape)
         y = self.swish(self.bn3(self.conv2(y)))
-        # print('dep. sep. conv:', y.shape)
         y = self.swish(self.bn4(self.conv3(y)))
-        # print('dconv 1x1:', y.shape)
-        y = self.bn5(self.conv4(y))
-        # print('dconv 3x3:', y.shape)
+        if self.conv4:
+            y = self.bn5(self.conv4(y))
         y = self.se(y)
         if self.rconv:
             x = self.rconv(x)
-        # print('final x,y:', x.shape, y.shape)
-        return y+x
+        return y + x
 
 
 class Block(nn.Module):
@@ -95,7 +94,7 @@ class RHPBM(nn.Module):
         self.feature_h = height
         self.feature_w = width
 
-        for i in range(6):
+        for i in range(4):
             self.feature_h = (self.feature_h - 1) // 2 + 1
             self.feature_w = (self.feature_w - 1) // 2 + 1
 
@@ -104,11 +103,9 @@ class RHPBM(nn.Module):
 
         self.front_conv = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, stride=2, padding=1)
         self.front_bn = nn.BatchNorm2d(32)
-        self.enc_block1 = Block(in_channels=32, out_channels=32, stride=2, block_type='encoder_block')
-        self.enc_block2 = Block(in_channels=32, out_channels=64, stride=2, block_type='encoder_block')
-        self.enc_block3 = Block(in_channels=64, out_channels=128, stride=2, block_type='encoder_block')
-        self.enc_block4 = Block(in_channels=128, out_channels=256, stride=2, block_type='encoder_block')
-        self.enc_block5 = Block(in_channels=256, out_channels=256, stride=2, block_type='encoder_block')
+        self.enc_block1 = Block(in_channels=32, out_channels=64, stride=2, block_type='encoder_block')
+        self.enc_block2 = Block(in_channels=64, out_channels=128, stride=2, block_type='encoder_block')
+        self.enc_block3 = Block(in_channels=128, out_channels=256, stride=2, block_type='encoder_block')
         self.fc = nn.Linear(self.feature_h * self.feature_w * 256, 512)
         self.drop = nn.Dropout(0.3)
         self.mean_z = nn.Linear(512, d)
@@ -117,12 +114,13 @@ class RHPBM(nn.Module):
         self.dfc1 = nn.Linear(d, 512)
         self.dfc2 = nn.Linear(512, self.feature_h * self.feature_w * 256)
         self.ddrop = nn.Dropout(0.3)
-        self.dec_block1 = Block(in_channels=256, out_channels=256, stride=2, block_type='decoder_block', output_padding=1)
-        self.dec_block2 = Block(in_channels=256, out_channels=128, stride=2, block_type='decoder_block', output_padding=(0, 1))
-        self.dec_block3 = Block(in_channels=128, out_channels=64, stride=2, block_type='decoder_block', output_padding=1)
-        self.dec_block4 = Block(in_channels=64, out_channels=32, stride=2, block_type='decoder_block', output_padding=1)
-        self.dec_block5 = Block(in_channels=32, out_channels=32, stride=2, block_type='decoder_block', output_padding=1)
-        self.end_conv = nn.ConvTranspose2d(in_channels=32, out_channels=3, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.dec_block1 = Block(in_channels=256, out_channels=128, stride=2, block_type='decoder_block',
+                                output_padding=1)
+        self.dec_block2 = Block(in_channels=128, out_channels=64, stride=2, block_type='decoder_block',
+                                output_padding=1)
+        self.dec_block3 = Block(in_channels=64, out_channels=32, stride=2, block_type='decoder_block', output_padding=1)
+        self.end_conv = nn.ConvTranspose2d(in_channels=32, out_channels=3, kernel_size=3, stride=2, padding=1,
+                                           output_padding=1)
 
     def encode(self, x):
         # print('-------------encoder-------------')
@@ -134,11 +132,7 @@ class RHPBM(nn.Module):
         z = self.enc_block2(z)
         # print("[Encode Layer 2]: ", z.shape)
         z = self.enc_block3(z)
-        # print("[Encode Layer 3]: ", z.shape)
-        z = self.enc_block4(z)
-        # print("[Encode Layer 4]: ", z.shape)
-        z = self.enc_block5(z)
-        # print("[Encode Layer 5]: ", z.shape, z.view(-1, self.feature_h * self.feature_w * 256).shape)
+        # print("[Encode Layer 3]: ", z.shape, z.view(-1, self.feature_h * self.feature_w * 256).shape)
         z = self.relu(self.drop(self.fc(z.view(-1, self.feature_h * self.feature_w * 256))))
         # print("[FC Layer]: ", z.shape)
         return self.mean_z(z), self.logvar_z(z)
@@ -156,10 +150,6 @@ class RHPBM(nn.Module):
         # print("[Decode Layer2]: ", _x.shape)
         _x = self.dec_block3(_x)
         # print("[Decode Layer3]: ", _x.shape)
-        _x = self.dec_block4(_x)
-        # print("[Decode Layer4]: ", _x.shape)
-        _x = self.dec_block5(_x)
-        # print("[Decode Layer5]: ", _x.shape)
         _x = self.sigmoid(self.end_conv(_x))
         # print("[Output]: ", _x.shape)
         return _x
