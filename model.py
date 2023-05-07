@@ -164,8 +164,8 @@ class RHPBM(nn.Module):
 
     @staticmethod
     def reparam(mean_z, logvar_z):
-        std = torch.exp(0.5 * logvar_z)
-        eps = torch.randn_like(std)
+        std = logvar_z.mul(0.5).exp()
+        eps = torch.randn_like(std).to('cuda:0')
         return eps.mul(std).add_(mean_z)
 
     def forward(self, x):
