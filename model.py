@@ -118,7 +118,7 @@ class RHPBM(nn.Module):
         self.enc_block4 = Block(in_channels=128, out_channels=256, stride=2, block_type='encoder_block')
         self.fc = nn.Linear(self.feature_h * self.feature_w * 256, 1024)
         self.drop = nn.Dropout(0.3)
-        self.mean_z = nn.Linear(1024, d)
+        self.mu_z = nn.Linear(1024, d)
         self.logvar_z = nn.Linear(1024, d)
 
         self.dfc1 = nn.Linear(d, 1024)
@@ -143,7 +143,7 @@ class RHPBM(nn.Module):
         # print("[Encode Layer 5]: ", z.shape, z.view(-1, self.feature_h * self.feature_w * 256).shape)
         z = self.relu(self.drop(self.fc(z.view(-1, self.feature_h * self.feature_w * 256))))
         # print("[FC Layer]: ", z.shape)
-        return self.mean_z(z), self.logvar_z(z)
+        return self.mu_z(z), self.logvar_z(z)
 
     def decode(self, z):
         # print('-------------decoder-------------')
@@ -163,12 +163,12 @@ class RHPBM(nn.Module):
         return _x
 
     @staticmethod
-    def reparam(mean_z, logvar_z):
+    def reparam(mu_z, logvar_z):
         std = logvar_z.mul(0.5).exp()
         eps = torch.randn_like(std).to('cuda:0')
-        return eps.mul(std).add_(mean_z)
+        return eps.mul(std).add_(mu_z)
 
     def forward(self, x):
-        mean_z, logvar_z = self.encode(x)
-        _z = RHPBM.reparam(mean_z, logvar_z)
-        return self.decode(_z), mean_z, logvar_z
+        mu_z, logvar_z = self.encode(x)
+        _z = RHPBM.reparam(mu_z, logvar_z)
+        return self.decode(_z), mu_z, logvar_z
