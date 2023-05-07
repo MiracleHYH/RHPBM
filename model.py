@@ -10,11 +10,12 @@ class EncoderCell(nn.Module):
         self.swish = Swish()
 
         self.bn1 = nn.BatchNorm2d(in_channels)
-        self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1, stride=stride)
+        self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1,
+                               stride=stride)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
         self.se = SE(out_channels)
-        
+
         self.shortcut = None
         if stride > 1:
             self.shortcut = nn.Sequential(
@@ -28,11 +29,11 @@ class EncoderCell(nn.Module):
         y = self.se(y)
         if self.rconv:
             x = self.shortcut(x)
-        return y+x.mul(0.5)
+        return y + x
 
 
 class DecoderCell(nn.Module):
-    def __init__(self, in_channels, out_channels, stride, ext, output_padding):
+    def __init__(self, in_channels, out_channels, stride, ext):
         super(DecoderCell, self).__init__()
         self.tag = stride > 1
 
@@ -47,13 +48,14 @@ class DecoderCell(nn.Module):
         self.conv3 = nn.Conv2d(in_channels=ext_channels, out_channels=in_channels, kernel_size=1)
         self.bn4 = nn.BatchNorm2d(in_channels)
         if self.tag:
-            self.conv4 = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=stride, padding=1, output_padding=output_padding)
+            self.conv4 = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3,
+                                            stride=stride, padding=1, output_padding=1)
             self.bn5 = nn.BatchNorm2d(out_channels)
         self.se = SE(out_channels)
         if self.tag:
             self.shortcut = nn.Sequential(
                 nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride,
-                                   output_padding=output_padding),
+                                   output_padding=1),
                 nn.BatchNorm2d(out_channels)
             )
 
@@ -74,18 +76,18 @@ class DecoderCell(nn.Module):
         if self.tag:
             x = self.shortcut(x)
         # print('final x,y:', x.shape, y.shape)
-        return y+x.mul(0.5)
+        return y + x
 
 
 class Block(nn.Module):
-    def __init__(self, in_channels, out_channels, stride, block_type, output_padding=None):
+    def __init__(self, in_channels, out_channels, stride, block_type):
         super(Block, self).__init__()
         if block_type == 'encoder_block':
             self.cell1 = EncoderCell(in_channels, out_channels, stride)
             self.cell2 = EncoderCell(out_channels, out_channels, 1)
         else:
-            self.cell1 = DecoderCell(in_channels, out_channels, stride, 2, output_padding=output_padding)
-            self.cell2 = DecoderCell(out_channels, out_channels, 1, 2, output_padding=0)
+            self.cell1 = DecoderCell(in_channels, out_channels, stride, 2)
+            self.cell2 = DecoderCell(out_channels, out_channels, 1, 2)
 
     def forward(self, x):
         y = self.cell1(x)
@@ -102,34 +104,31 @@ class RHPBM(nn.Module):
         self.feature_h = height
         self.feature_w = width
 
-        for i in range(6):
+        for i in range(3):
             self.feature_h = (self.feature_h - 1) // 2 + 1
             self.feature_w = (self.feature_w - 1) // 2 + 1
 
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
-        self.front_conv = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, stride=2, padding=1)
+        self.front_conv = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, padding=1)
         self.front_bn = nn.BatchNorm2d(32)
-        self.enc_block1 = Block(in_channels=32, out_channels=32, stride=2, block_type='encoder_block')
         self.enc_block2 = Block(in_channels=32, out_channels=64, stride=2, block_type='encoder_block')
         self.enc_block3 = Block(in_channels=64, out_channels=128, stride=2, block_type='encoder_block')
         self.enc_block4 = Block(in_channels=128, out_channels=256, stride=2, block_type='encoder_block')
-        self.enc_block5 = Block(in_channels=256, out_channels=256, stride=2, block_type='encoder_block')
-        self.fc = nn.Linear(self.feature_h * self.feature_w * 256, 512)
+        self.fc = nn.Linear(self.feature_h * self.feature_w * 256, 1024)
         self.drop = nn.Dropout(0.3)
-        self.mean_z = nn.Linear(512, d)
-        self.logvar_z = nn.Linear(512, d)
+        self.mean_z = nn.Linear(1024, d)
+        self.logvar_z = nn.Linear(1024, d)
 
-        self.dfc1 = nn.Linear(d, 512)
-        self.dfc2 = nn.Linear(512, self.feature_h * self.feature_w * 256)
+        self.dfc1 = nn.Linear(d, 1024)
+        self.dfc2 = nn.Linear(1024, self.feature_h * self.feature_w * 1024)
         self.ddrop = nn.Dropout(0.3)
-        self.dec_block1 = Block(in_channels=256, out_channels=256, stride=2, block_type='decoder_block', output_padding=1)
-        self.dec_block2 = Block(in_channels=256, out_channels=128, stride=2, block_type='decoder_block', output_padding=(0, 1))
-        self.dec_block3 = Block(in_channels=128, out_channels=64, stride=2, block_type='decoder_block', output_padding=1)
-        self.dec_block4 = Block(in_channels=64, out_channels=32, stride=2, block_type='decoder_block', output_padding=1)
-        self.dec_block5 = Block(in_channels=32, out_channels=32, stride=2, block_type='decoder_block', output_padding=1)
-        self.end_conv = nn.ConvTranspose2d(in_channels=32, out_channels=3, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.dec_block1 = Block(in_channels=256, out_channels=128, stride=2, block_type='decoder_block')
+        self.dec_block2 = Block(in_channels=128, out_channels=64, stride=2, block_type='decoder_block')
+        self.dec_block3 = Block(in_channels=64, out_channels=32, stride=2, block_type='decoder_block')
+        self.end_conv = nn.ConvTranspose2d(in_channels=32, out_channels=3, kernel_size=3, padding=1)
+        self.end_bn = nn.BatchNorm2d(32)
 
     def encode(self, x):
         # print('-------------encoder-------------')
@@ -141,10 +140,6 @@ class RHPBM(nn.Module):
         z = self.enc_block2(z)
         # print("[Encode Layer 2]: ", z.shape)
         z = self.enc_block3(z)
-        # print("[Encode Layer 3]: ", z.shape)
-        z = self.enc_block4(z)
-        # print("[Encode Layer 4]: ", z.shape)
-        z = self.enc_block5(z)
         # print("[Encode Layer 5]: ", z.shape, z.view(-1, self.feature_h * self.feature_w * 256).shape)
         z = self.relu(self.drop(self.fc(z.view(-1, self.feature_h * self.feature_w * 256))))
         # print("[FC Layer]: ", z.shape)
@@ -163,11 +158,7 @@ class RHPBM(nn.Module):
         # print("[Decode Layer2]: ", _x.shape)
         _x = self.dec_block3(_x)
         # print("[Decode Layer3]: ", _x.shape)
-        _x = self.dec_block4(_x)
-        # print("[Decode Layer4]: ", _x.shape)
-        _x = self.dec_block5(_x)
-        # print("[Decode Layer5]: ", _x.shape)
-        _x = self.sigmoid(self.end_conv(_x))
+        _x = self.sigmoid(self.end_conv(self.end_bn(_x)))
         # print("[Output]: ", _x.shape)
         return _x
 
