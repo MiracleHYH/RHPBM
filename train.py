@@ -39,7 +39,7 @@ def train():
     dataset = torch.utils.data.TensorDataset(torch.FloatTensor(imgs / 256))
     loader = torch.utils.data.DataLoader(dataset, batch_size=batch, shuffle=True)
 
-    model = RHPBM(info['height'], info['width'], d)
+    model = RHPBM(d)
     model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     for step in range(epoch):

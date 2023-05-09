@@ -1,165 +1,213 @@
 import torch
 from torch import nn
 
-from thirdparty import SE, Swish, DepthwiseSeparableConvolution
+from thirdparty import BasicConv2d, BasicConvTranspose2d
 
 
-class EncoderCell(nn.Module):
-    def __init__(self, in_channels, out_channels, stride):
-        super(EncoderCell, self).__init__()
-        self.swish = Swish()
-
-        self.bn1 = nn.BatchNorm2d(in_channels)
-        self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1,
-                               stride=stride)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
-        self.se = SE(out_channels)
-
-        self.shortcut = None
-        if stride > 1:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride),
-                nn.BatchNorm2d(out_channels)
-            )
+class Stem(nn.Module):
+    def __init__(self):
+        super(Stem, self).__init__()
+        self.stem = nn.Sequential(
+            BasicConv2d(in_planes=3, out_planes=32, kernel_size=3, stride=2, padding=0),
+            BasicConv2d(in_planes=32, out_planes=32, kernel_size=3, stride=1, padding=0),
+            BasicConv2d(in_planes=32, out_planes=64, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=0),
+            # nn.AvgPool2d(kernel_size=3, stride=2, padding=0)
+            # BasicConv2d(in_planes=64, out_planes=64, kernel_size=3, stride=2, padding=0)
+            BasicConv2d(in_planes=64, out_planes=80, kernel_size=1, stride=1, padding=0),
+            BasicConv2d(in_planes=80, out_planes=192, kernel_size=3, stride=1, padding=0),
+            BasicConv2d(in_planes=192, out_planes=256, kernel_size=3, stride=2, padding=0)
+        )
 
     def forward(self, x):
-        y = self.conv1(self.swish(self.bn1(x)))
-        y = self.conv2(self.swish(self.bn2(y)))
-        y = self.se(y)
-        if self.rconv:
-            x = self.shortcut(x)
-        return y + x
+        y = self.stem(x)
+        return y
 
 
-class DecoderCell(nn.Module):
-    def __init__(self, in_channels, out_channels, stride, ext):
-        super(DecoderCell, self).__init__()
-        self.tag = stride > 1
+class InceptionResnetA(nn.Module):
+    def __init__(self, scale=0.1):
+        super(InceptionResnetA, self).__init__()
 
-        ext_channels = in_channels * ext
-        self.swish = Swish()
+        self.scale = scale
 
-        self.bn1 = nn.BatchNorm2d(in_channels)
-        self.conv1 = nn.Conv2d(in_channels=in_channels, out_channels=ext_channels, kernel_size=1)
-        self.bn2 = nn.BatchNorm2d(ext_channels)
-        self.conv2 = DepthwiseSeparableConvolution(in_channels=ext_channels, out_channels=ext_channels)
-        self.bn3 = nn.BatchNorm2d(ext_channels)
-        self.conv3 = nn.Conv2d(in_channels=ext_channels, out_channels=in_channels, kernel_size=1)
-        self.bn4 = nn.BatchNorm2d(in_channels)
-        if self.tag:
-            self.conv4 = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3,
-                                            stride=stride, padding=1, output_padding=1)
-            self.bn5 = nn.BatchNorm2d(out_channels)
-        self.se = SE(out_channels)
-        if self.tag:
-            self.shortcut = nn.Sequential(
-                nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride,
-                                   output_padding=1),
-                nn.BatchNorm2d(out_channels)
-            )
+        self.branch1 = nn.Sequential(
+            BasicConv2d(in_planes=256, out_planes=32, kernel_size=1, stride=1, padding=0)
+        )
+        self.branch2 = nn.Sequential(
+            BasicConv2d(in_planes=256, out_planes=32, kernel_size=1, stride=1, padding=0),
+            BasicConv2d(in_planes=32, out_planes=32, kernel_size=3, stride=1, padding=1)
+        )
+        self.branch3 = nn.Sequential(
+            BasicConv2d(in_planes=256, out_planes=32, kernel_size=1, stride=1, padding=0),
+            BasicConv2d(in_planes=32, out_planes=32, kernel_size=3, stride=1, padding=1),
+            BasicConv2d(in_planes=32, out_planes=32, kernel_size=3, stride=1, padding=1)
+        )
+        self.conv = nn.Conv2d(in_channels=96, out_channels=256, kernel_size=1, stride=1, padding=0)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
-        # print("--------------------------")
-        # print('input:', x.shape)
-        y = self.bn1(x)
-        y = self.swish(self.bn2(self.conv1(y)))
-        # print('conv 1x1:', y.shape)
-        y = self.swish(self.bn3(self.conv2(y)))
-        # print('dep. sep. conv:', y.shape)
-        y = self.swish(self.bn4(self.conv3(y)))
-        # print('dconv 1x1:', y.shape)
-        if self.tag:
-            y = self.bn5(self.conv4(y))
-        # print('dconv 3x3:', y.shape)
-        y = self.se(y)
-        if self.tag:
-            x = self.shortcut(x)
-        # print('final x,y:', x.shape, y.shape)
-        return y + x
+        y = torch.cat([self.branch1(x), self.branch2(x), self.branch3(x)], dim=1)
+        y = self.conv(y)
+        return self.relu(y * self.scale + x)
 
 
-class Block(nn.Module):
-    def __init__(self, in_channels, out_channels, stride, block_type):
-        super(Block, self).__init__()
-        if block_type == 'encoder_block':
-            self.cell1 = EncoderCell(in_channels, out_channels, stride)
-            self.cell2 = EncoderCell(out_channels, out_channels, 1)
-        else:
-            self.cell1 = DecoderCell(in_channels, out_channels, stride, 2)
-            self.cell2 = DecoderCell(out_channels, out_channels, 1, 2)
+class InceptionResnetB(nn.Module):
+    def __init__(self, scale=0.1):
+        super(InceptionResnetB, self).__init__()
+
+        self.scale = scale
+
+        self.branch1 = nn.Sequential(
+            BasicConv2d(in_planes=896, out_planes=128, kernel_size=1, stride=1, padding=0)
+        )
+        self.branch2 = nn.Sequential(
+            BasicConv2d(in_planes=896, out_planes=128, kernel_size=1, stride=1, padding=0),
+            BasicConv2d(in_planes=128, out_planes=128, kernel_size=(1, 7), stride=1, padding=(0, 3)),
+            BasicConv2d(in_planes=128, out_planes=128, kernel_size=(7, 1), stride=1, padding=(3, 0))
+        )
+        self.conv = nn.Conv2d(in_channels=256, out_channels=896, kernel_size=1, stride=1, padding=0)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
-        y = self.cell1(x)
-        y = self.cell2(y)
+        y = torch.cat([self.branch1(x), self.branch2(x)], dim=1)
+        y = self.conv(y)
+        return self.relu(y * self.scale + x)
+
+
+class InceptionResnetC(nn.Module):
+    def __init__(self, scale=0.1):
+        super(InceptionResnetC, self).__init__()
+
+        self.scale = scale
+
+        self.branch1 = nn.Sequential(
+            BasicConv2d(in_planes=1792, out_planes=192, kernel_size=1, stride=1, padding=0)
+        )
+        self.branch2 = nn.Sequential(
+            BasicConv2d(in_planes=1792, out_planes=192, kernel_size=1, stride=1, padding=0),
+            BasicConv2d(in_planes=192, out_planes=192, kernel_size=(1, 3), stride=1, padding=(0, 1)),
+            BasicConv2d(in_planes=192, out_planes=192, kernel_size=(3, 1), stride=1, padding=(1, 0))
+        )
+        self.conv = nn.Conv2d(in_channels=384, out_channels=896, kernel_size=1, stride=1, padding=0)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        y = torch.cat([self.branch1(x), self.branch2(x)], dim=1)
+        y = self.conv(y)
+        return self.relu(y * self.scale + x)
+
+
+class ReductionA(nn.Module):
+    def __init__(self):
+        super(ReductionA, self).__init__()
+        self.branch1 = nn.Sequential(
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=0)
+        )
+        self.branch2 = nn.Sequential(
+            BasicConv2d(in_planes=256, out_planes=384, kernel_size=3, stride=2, padding=0)
+        )
+        self.branch3 = nn.Sequential(
+            BasicConv2d(in_planes=256, out_planes=192, kernel_size=1, stride=1, padding=0),
+            BasicConv2d(in_planes=192, out_planes=192, kernel_size=3, stride=1, padding=1),
+            BasicConv2d(in_planes=192, out_planes=256, kernel_size=3, stride=2, padding=0)
+        )
+
+    def forward(self, x):
+        y = torch.cat([self.branch1(x), self.branch2(x), self.branch3(x)], dim=1)
+        return y
+
+
+class ReductionB(nn.Module):
+    def __init__(self):
+        super(ReductionB, self).__init__()
+        self.branch1 = nn.Sequential(
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=0)
+        )
+        self.branch2 = nn.Sequential(
+            BasicConv2d(in_planes=896, out_planes=256, kernel_size=1, stride=1, padding=0),
+            BasicConv2d(in_planes=256, out_planes=384, kernel_size=3, stride=2, padding=0)
+        )
+        self.branch3 = nn.Sequential(
+            BasicConv2d(in_planes=896, out_planes=256, kernel_size=1, stride=1, padding=0),
+            BasicConv2d(in_planes=256, out_planes=256, kernel_size=3, stride=2, padding=0)
+        )
+        self.branch4 = nn.Sequential(
+            BasicConv2d(in_planes=896, out_planes=256, kernel_size=1, stride=1, padding=0),
+            BasicConv2d(in_planes=256, out_planes=256, kernel_size=3, stride=1, padding=1),
+            BasicConv2d(in_planes=256, out_planes=256, kernel_size=3, stride=2, padding=0)
+        )
+
+    def forward(self, x):
+        y = torch.cat([self.branch1(x), self.branch2(x), self.branch3(x), self.branch4(x)], dim=1)
+        return y
+
+
+class StemTranspose(nn.Module):
+    def __init__(self):
+        super(StemTranspose, self).__init__()
+        self.stem_transpose = nn.Sequential(
+            BasicConvTranspose2d(in_planes=256, out_planes=192, kernel_size=3, stride=2, padding=0, output_padding=0),
+            BasicConvTranspose2d(in_planes=192, out_planes=80, kernel_size=3, stride=1, padding=0, output_padding=0),
+            BasicConvTranspose2d(in_planes=80, out_planes=64, kernel_size=1, stride=1, padding=0, output_padding=0),
+            nn.MaxUnpool2d(kernel_size=3, stride=2, padding=0),
+            BasicConvTranspose2d(in_planes=64, out_planes=32, kernel_size=3, stride=1, padding=1, output_padding=0),
+            BasicConvTranspose2d(in_planes=32, out_planes=32, kernel_size=3, stride=1, padding=0, output_padding=0),
+            BasicConvTranspose2d(in_planes=32, out_planes=3, kernel_size=3, stride=2, padding=0, output_padding=0)
+        )
+
+    def forward(self, x):
+        y = self.stem_transpose(x)
         return y
 
 
 class RHPBM(nn.Module):
-    def __init__(self, height, width, d):
+    def __init__(self, d):
         super(RHPBM, self).__init__()
 
-        self.height = height
-        self.width = width
-        self.feature_h = height
-        self.feature_w = width
+        layers = list()
+        layers.append(Stem())
+        for i in range(5):
+            layers.append(InceptionResnetA(scale=0.1))
+        layers.append(ReductionA())
+        for i in range(10):
+            layers.append(InceptionResnetB(scale=0.1))
+        layers.append(ReductionB())
+        for i in range(5):
+            layers.append(InceptionResnetC(scale=0.1))
+        layers.append(nn.AdaptiveAvgPool2d(1))
+        layers.append(nn.Dropout(0.3))
+        layers.append(nn.Linear(in_features=1792, out_features=512, bias=False))
+        layers.append(nn.BatchNorm1d(512))
 
-        for i in range(3):
-            self.feature_h = (self.feature_h - 1) // 2 + 1
-            self.feature_w = (self.feature_w - 1) // 2 + 1
+        self.inception = nn.Sequential(*layers)
+        self.mu_z = nn.Linear(in_features=512, out_features=d)
+        self.logvar_z = nn.Linear(in_features=512, out_features=d)
 
-        self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()
+        self.dfc = nn.Sequential(
+            nn.Linear(in_features=d, out_features=512),
+            nn.Linear(in_features=512, out_features=1792),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+            nn.Linear(in_features=1792, out_features=1792*8*8, bias=False),
+            nn.BatchNorm2d(1792),
+            nn.ReLU()
+        )
 
-        self.front_conv = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, padding=1)
-        self.front_bn = nn.BatchNorm2d(32)
-        self.enc_block2 = Block(in_channels=32, out_channels=64, stride=2, block_type='encoder_block')
-        self.enc_block3 = Block(in_channels=64, out_channels=128, stride=2, block_type='encoder_block')
-        self.enc_block4 = Block(in_channels=128, out_channels=256, stride=2, block_type='encoder_block')
-        self.fc = nn.Linear(self.feature_h * self.feature_w * 256, 1024)
-        self.drop = nn.Dropout(0.3)
-        self.mu_z = nn.Linear(1024, d)
-        self.logvar_z = nn.Linear(1024, d)
-
-        self.dfc1 = nn.Linear(d, 1024)
-        self.dfc2 = nn.Linear(1024, self.feature_h * self.feature_w * 1024)
-        self.ddrop = nn.Dropout(0.3)
-        self.dec_block1 = Block(in_channels=256, out_channels=128, stride=2, block_type='decoder_block')
-        self.dec_block2 = Block(in_channels=128, out_channels=64, stride=2, block_type='decoder_block')
-        self.dec_block3 = Block(in_channels=64, out_channels=32, stride=2, block_type='decoder_block')
-        self.end_conv = nn.ConvTranspose2d(in_channels=32, out_channels=3, kernel_size=3, padding=1)
-        self.end_bn = nn.BatchNorm2d(32)
+        self.recover = nn.Sequential(
+            BasicConvTranspose2d(in_planes=1792, out_planes=896, kernel_size=3, stride=2, padding=0, output_padding=0),
+            BasicConvTranspose2d(in_planes=896, out_planes=256, kernel_size=3, stride=2, padding=0, output_padding=0),
+            StemTranspose()
+        )
 
     def encode(self, x):
-        # print('-------------encoder-------------')
-        # print("[Input]: ", x.shape)
-        z = self.relu(self.front_bn(self.front_conv(x)))
-        # print("[Front Layer]: ", z.shape)
-        z = self.enc_block1(z)
-        # print("[Encode Layer 1]: ", z.shape)
-        z = self.enc_block2(z)
-        # print("[Encode Layer 2]: ", z.shape)
-        z = self.enc_block3(z)
-        # print("[Encode Layer 5]: ", z.shape, z.view(-1, self.feature_h * self.feature_w * 256).shape)
-        z = self.relu(self.drop(self.fc(z.view(-1, self.feature_h * self.feature_w * 256))))
-        # print("[FC Layer]: ", z.shape)
-        return self.mu_z(z), self.logvar_z(z)
+        z = self.inception(x)
+        mu_z = self.mu_z(z)
+        logvar_z = self.logvar_z(z)
+        return mu_z, logvar_z
 
     def decode(self, z):
-        # print('-------------decoder-------------')
-        # print("[Input]: ", z.shape)
-        _x = self.relu(self.dfc1(z))
-        # print("[FC Layer1]: ", _x.shape)
-        _x = self.relu(self.ddrop(self.dfc2(_x)))
-        # print("[FC Layer2]: ", _x.shape, _x.view(-1, 256, self.feature_h, self.feature_w).shape)
-        _x = self.dec_block1(_x.view(-1, 256, self.feature_h, self.feature_w))
-        # print("[Decode Layer1]: ", _x.shape)
-        _x = self.dec_block2(_x)
-        # print("[Decode Layer2]: ", _x.shape)
-        _x = self.dec_block3(_x)
-        # print("[Decode Layer3]: ", _x.shape)
-        _x = self.sigmoid(self.end_conv(self.end_bn(_x)))
-        # print("[Output]: ", _x.shape)
+        _x = self.dfc(z)
+        _x = self.recover(_x)
         return _x
 
     @staticmethod

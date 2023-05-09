@@ -4,6 +4,7 @@ import numpy as np
 from rich.progress import Progress
 import json
 
+RESIZE = True
 video_name = 'Video_009'
 proj_dir = os.path.abspath('.')
 
@@ -28,6 +29,8 @@ if info['length'] <= 2000:
         while cap.isOpened() and frame_idx < info['length']:
             ret, frame = cap.read()
             if ret:
+                if RESIZE:
+                    frame = cv2.resize(frame, (299, 299))
                 dataset[frame_idx, :, :, :] = np.transpose(frame, (2, 0, 1))
                 frame_idx += 1
                 progress.advance(task, 1)
