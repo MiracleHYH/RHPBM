@@ -176,10 +176,12 @@ class RHPBM(nn.Module):
             layers.append(InceptionResnetC(scale=0.1))
         layers.append(nn.AdaptiveAvgPool2d(1))
         layers.append(nn.Dropout(0.3))
-        layers.append(nn.Linear(in_features=1792, out_features=512, bias=False))
-        layers.append(nn.BatchNorm1d(512))
-
         self.inception = nn.Sequential(*layers)
+        self.fc = nn.Sequential(
+            nn.Linear(in_features=1792, out_features=512, bias=False),
+            nn.BatchNorm1d(512),
+            nn.ReLU()
+        )
         self.mu_z = nn.Linear(in_features=512, out_features=d)
         self.logvar_z = nn.Linear(in_features=512, out_features=d)
 
@@ -201,6 +203,7 @@ class RHPBM(nn.Module):
 
     def encode(self, x):
         z = self.inception(x)
+        z = self.fc(z.view(-1, 1792))
         mu_z = self.mu_z(z)
         logvar_z = self.logvar_z(z)
         return mu_z, logvar_z
