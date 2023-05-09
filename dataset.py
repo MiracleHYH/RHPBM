@@ -22,7 +22,7 @@ info = {
 }
 
 if info['length'] <= 2000:
-    dataset = np.empty([info['length'], info['channel'], info['height'], info['width']])  # [样本,通道(BGR),高,宽]
+    dataset = np.empty([info['length'], info['channel'], 299, 299])  # [样本,通道(BGR),高,宽]
     with Progress() as progress:
         task = progress.add_task("loading %s" % video_name, total=info['length'])
         frame_idx = 0
