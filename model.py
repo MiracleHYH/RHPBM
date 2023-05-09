@@ -149,7 +149,7 @@ class StemTranspose(nn.Module):
             BasicConvTranspose2d(in_planes=256, out_planes=192, kernel_size=3, stride=2, padding=0, output_padding=0),
             BasicConvTranspose2d(in_planes=192, out_planes=80, kernel_size=3, stride=1, padding=0, output_padding=0),
             BasicConvTranspose2d(in_planes=80, out_planes=64, kernel_size=1, stride=1, padding=0, output_padding=0),
-            nn.MaxUnpool2d(kernel_size=3, stride=2, padding=0),
+            BasicConvTranspose2d(in_planes=64, out_planes=64, kernel_size=3, stride=2, padding=0, output_padding=0),
             BasicConvTranspose2d(in_planes=64, out_planes=32, kernel_size=3, stride=1, padding=1, output_padding=0),
             BasicConvTranspose2d(in_planes=32, out_planes=32, kernel_size=3, stride=1, padding=0, output_padding=0),
             BasicConvTranspose2d(in_planes=32, out_planes=3, kernel_size=3, stride=2, padding=0, output_padding=0)
@@ -191,7 +191,7 @@ class RHPBM(nn.Module):
             nn.Dropout(0.3),
             nn.ReLU(),
             nn.Linear(in_features=1792, out_features=1792*8*8, bias=False),
-            nn.BatchNorm2d(1792),
+            nn.BatchNorm1d(1792*8*8),
             nn.ReLU()
         )
 
@@ -210,7 +210,7 @@ class RHPBM(nn.Module):
 
     def decode(self, z):
         _x = self.dfc(z)
-        _x = self.recover(_x)
+        _x = self.recover(_x.view(-1, 1792, 8, 8))
         return _x
 
     @staticmethod
