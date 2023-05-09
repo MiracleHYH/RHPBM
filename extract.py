@@ -26,7 +26,7 @@ def extract():
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     video_writer = cv2.VideoWriter('%s_ori_rec.mp4' % video, fourcc, info['fps'], (info['width'], info['height'] * 2))
 
-    model = RHPBM(info['height'], info['width'], d)
+    model = RHPBM(d)
     model.load_state_dict(torch.load(model_path))
     model.to(device)
 
