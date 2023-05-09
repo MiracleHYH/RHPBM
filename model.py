@@ -88,7 +88,7 @@ class InceptionResnetC(nn.Module):
             BasicConv2d(in_planes=192, out_planes=192, kernel_size=(1, 3), stride=1, padding=(0, 1)),
             BasicConv2d(in_planes=192, out_planes=192, kernel_size=(3, 1), stride=1, padding=(1, 0))
         )
-        self.conv = nn.Conv2d(in_channels=384, out_channels=896, kernel_size=1, stride=1, padding=0)
+        self.conv = nn.Conv2d(in_channels=384, out_channels=1792, kernel_size=1, stride=1, padding=0)
         self.relu = nn.ReLU()
 
     def forward(self, x):
