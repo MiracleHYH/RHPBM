@@ -5,7 +5,7 @@ from rich.progress import Progress
 import json
 
 RESIZE = True
-video_name = 'Video_009'
+video_name = 'Video_003'
 proj_dir = os.path.abspath('.')
 
 video_path = os.path.join(proj_dir, 'data', 'video', '%s.avi' % video_name)
