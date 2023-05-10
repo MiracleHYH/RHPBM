@@ -152,7 +152,9 @@ class StemTranspose(nn.Module):
             BasicConvTranspose2d(in_planes=64, out_planes=64, kernel_size=3, stride=2, padding=0, output_padding=0),
             BasicConvTranspose2d(in_planes=64, out_planes=32, kernel_size=3, stride=1, padding=1, output_padding=0),
             BasicConvTranspose2d(in_planes=32, out_planes=32, kernel_size=3, stride=1, padding=0, output_padding=0),
-            BasicConvTranspose2d(in_planes=32, out_planes=3, kernel_size=3, stride=2, padding=0, output_padding=0)
+            nn.ConvTranspose2d(in_channels=32, out_channels=3, kernel_size=3, stride=2, padding=0, output_padding=0),
+            nn.Sigmoid()
+            # BasicConvTranspose2d(in_planes=32, out_planes=3, kernel_size=3, stride=2, padding=0, output_padding=0)
         )
 
     def forward(self, x):

@@ -12,6 +12,7 @@ from model import RHPBM
 batch = 100
 epoch = 200
 lr = 0.01
+lr_min = 0.0005
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 d = 10
@@ -25,6 +26,8 @@ data_path = os.path.join(dataset_dir, '%s.npy' % video)
 info_path = os.path.join(dataset_dir, '%s.json' % video)
 model_dir = os.path.join(proj_dir, 'checkpoint')
 
+save_log = False
+
 
 def loss(_x, x, mean_z, logvar_z):
     l1 = SparsityLoss(_x, x)
@@ -36,7 +39,8 @@ def train():
     imgs = np.load(data_path)
     with open(info_path) as f:
         info = json.load(f)
-    loss_writer = SummaryWriter('./log')
+    if save_log:
+        loss_writer = SummaryWriter('./log')
 
     dataset = torch.utils.data.TensorDataset(torch.FloatTensor(imgs / 256))
     loader = torch.utils.data.DataLoader(dataset, batch_size=batch, shuffle=True)
@@ -44,7 +48,7 @@ def train():
     model = RHPBM(d)
     model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=epoch, eta_min=0.0001)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=epoch, eta_min=lr_min)
     for step in range(epoch):
         model_loss = 0
         for _, ([data]) in enumerate(loader):
@@ -58,12 +62,14 @@ def train():
         scheduler.step()
         model_loss /= len(dataset)
         print('====> Epoch: %03d Loss : %0.8f' % ((step + 1), model_loss))
-        loss_writer.add_scalar('Loss', model_loss, step + 1)
+        if save_log:
+            loss_writer.add_scalar('Loss', model_loss, step + 1)
         if step and step % 10 == 0:
             torch.save(model.state_dict(), os.path.join(model_dir, '%s_%d.pth' % (video, step)))
 
     torch.save(model.state_dict(), os.path.join(model_dir, '%s_%d.pth' % (video, epoch)))
-    loss_writer.close()
+    if save_log:
+        loss_writer.close()
 
 
 if __name__ == '__main__':
