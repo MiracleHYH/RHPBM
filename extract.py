@@ -9,6 +9,7 @@ from model import RHPBM
 from rich.progress import track
 
 d = 10
+ckpt = '70'
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 video = 'Video_003'
@@ -16,7 +17,7 @@ proj_dir = os.path.abspath('.')
 dataset_dir = os.path.join(proj_dir, 'data', 'dataset')
 data_path = os.path.join(dataset_dir, '%s.npy' % video)
 info_path = os.path.join(dataset_dir, '%s.json' % video)
-model_path = os.path.join(proj_dir, 'checkpoint', '%s_200.pth' % video)
+model_path = os.path.join(proj_dir, 'checkpoint', '%s_%s.pth' % (video, ckpt))
 
 
 def extract():
@@ -25,7 +26,7 @@ def extract():
         info = json.load(f)
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    video_writer = cv2.VideoWriter('%s_ori_rec.mp4' % video, fourcc, info['fps'], (299, 299 * 2))
+    video_writer = cv2.VideoWriter('%s_%s_ori_rec.mp4' % (video, ckpt), fourcc, info['fps'], (299, 299 * 2))
 
     model = RHPBM(d)
     model.load_state_dict(torch.load(model_path))
